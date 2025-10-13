@@ -55,6 +55,11 @@ accounts_urlpatterns = [
         views.MailSettingsView.as_view(),
         name="mail_settings",
     ),
+    path(
+        "user/<int:pk>/shifts.ics",
+        views.user_shifts_ical,
+        name="user_shifts_ical",
+    ),
 ]
 
 urlpatterns = [

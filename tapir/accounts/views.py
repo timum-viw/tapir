@@ -434,3 +434,82 @@ class MailSettingsView(
                 choice=is_selected,
             )
         return super().form_valid(form)
+
+
+@login_required
+def user_shifts_ical(request, pk):
+    """Generate an iCal file containing all of a user's shifts."""
+    from icalendar import Calendar, Event
+    from django.utils import timezone
+
+    # Get the target user
+    target_user = get_object_or_404(TapirUser, pk=pk)
+
+    # Check permissions - users can only access their own shifts unless they have permission
+    if request.user != target_user and not request.user.has_perm(
+        PERMISSION_ACCOUNTS_VIEW
+    ):
+        raise PermissionDenied
+
+    # Create calendar
+    cal = Calendar()
+    cal.add("prodid", "-//Tapir//Shifts Calendar//EN")
+    cal.add("version", "2.0")
+    cal.add("x-wr-calname", f"{target_user.get_full_name()} - Tapir Shifts")
+    cal.add("x-wr-timezone", str(timezone.get_current_timezone()))
+
+    # Get all shift attendances for the user (both past and future)
+    shift_attendances = target_user.shift_attendances.select_related(
+        "slot__shift"
+    ).filter(state__in=[1, 2, 6])  # PENDING, DONE, LOOKING_FOR_STAND_IN
+
+    # Create an event for each shift attendance
+    for attendance in shift_attendances:
+        shift = attendance.slot.shift
+        
+        # Skip deleted or cancelled shifts
+        if shift.deleted or shift.cancelled:
+            continue
+
+        event = Event()
+        event.add("summary", shift.name)
+        event.add("dtstart", shift.start_time)
+        event.add("dtend", shift.end_time)
+        
+        # Add description with shift details
+        description_parts = []
+        if shift.description:
+            description_parts.append(shift.description)
+        
+        # Add slot information if available
+        if attendance.slot.name:
+            description_parts.append(f"Slot: {attendance.slot.name}")
+        
+        # Add custom time if applicable
+        if attendance.custom_time:
+            description_parts.append(f"Custom time: {attendance.custom_time}")
+        
+        if description_parts:
+            event.add("description", "\n".join(description_parts))
+        
+        # Add location if available (from shift description or template)
+        # You might want to customize this based on your actual location data
+        
+        # Add UID for proper calendar updates
+        event.add("uid", f"shift-{shift.id}-attendance-{attendance.id}@tapir")
+        
+        # Add status based on attendance state
+        if attendance.state == 1:  # PENDING
+            event.add("status", "CONFIRMED")
+        elif attendance.state == 2:  # DONE
+            event.add("status", "CONFIRMED")
+        elif attendance.state == 6:  # LOOKING_FOR_STAND_IN
+            event.add("status", "TENTATIVE")
+        
+        cal.add_component(event)
+
+    # Generate response
+    response = HttpResponse(cal.to_ical(), content_type="text/calendar")
+    filename = f"{target_user.username}_shifts.ics"
+    set_header_for_file_download(response, filename)
+    return response
