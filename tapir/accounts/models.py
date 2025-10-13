@@ -305,3 +305,7 @@ class OptionalMails(models.Model):
                 fields=["user", "mail_id"], name="user-mail-constraint"
             )
         ]
+
+
+# Import APIKey model to ensure it's registered with Django
+from tapir.accounts.api_key_models import APIKey  # noqa: E402, F401
